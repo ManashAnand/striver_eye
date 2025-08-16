@@ -1,0 +1,11 @@
+fastapi==0.100.1
+uvicorn[standard]==0.23.2
+python-dotenv
+requests
+
+# Database & async support
+sqlalchemy[asyncio]
+asyncpg
+
+# Optional but common utilities
+pydantic

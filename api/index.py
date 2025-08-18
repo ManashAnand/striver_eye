@@ -39,7 +39,7 @@ async def get_all_rows(db=Depends(get_supabase_client)):
     print(f"Type of db object: {type(db)}")
     try:
         # This is the Supabase equivalent of 'SELECT * FROM your_table_name'
-        response = await db.table("problems").select("*").execute()
+        response = await db.table("problems").select("*").limit(10).execute()
 
         # The actual data is in the .data attribute
         if response.data:

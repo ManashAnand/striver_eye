@@ -1,7 +1,524 @@
-import React from "react";
+"use client";
 
-const ChatBot = () => {
-  return <div></div>;
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  FC,
+  MouseEvent,
+} from "react";
+import { motion, AnimatePresence } from "motion/react";
+import {
+  MessageSquare,
+  Code,
+  Video,
+  Sun,
+  Moon,
+  MoreVertical,
+  Send,
+  Rows,
+  Columns,
+  Shuffle,
+  Star,
+  RefreshCw,
+} from "lucide-react";
+
+type PanelId = "chat" | "compiler" | "video";
+type Orientation = "vertical" | "horizontal";
+type DragHandle = "main" | "secondary" | null;
+
+interface Panel {
+  id: PanelId;
+  title: string;
+  icon: JSX.Element;
+}
+
+interface Message {
+  id: number;
+  text: string;
+  sender: "bot" | "user";
+}
+
+// Animation Variants
+const containerVariants = {
+  hidden: { opacity: 0 },
+  visible: { opacity: 1, transition: { staggerChildren: 0.1 } },
 };
 
-export default ChatBot;
+const itemVariants = {
+  hidden: { y: 20, opacity: 0 },
+  visible: { y: 0, opacity: 1 },
+};
+
+// Mock ShadCN UI Components
+const Card: FC<{ className?: string; children: React.ReactNode }> = ({
+  className,
+  children,
+}) => (
+  <motion.div
+    layout
+    className={`bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg overflow-hidden flex flex-col ${className}`}
+    whileHover={{ borderColor: "rgba(99, 102, 241, 0.5)" }}
+    transition={{ duration: 0.2 }}
+  >
+    {children}
+  </motion.div>
+);
+
+const CardHeader: FC<{ className?: string; children: React.ReactNode }> = ({
+  className,
+  children,
+}) => (
+  <div
+    className={`p-4 border-b border-gray-200 dark:border-gray-700 ${className}`}
+  >
+    {children}
+  </div>
+);
+const CardTitle: FC<{ className?: string; children: React.ReactNode }> = ({
+  className,
+  children,
+}) => (
+  <h3
+    className={`text-lg font-semibold text-gray-900 dark:text-white ${className}`}
+  >
+    {children}
+  </h3>
+);
+const CardContent: FC<{ className?: string; children: React.ReactNode }> = ({
+  className,
+  children,
+}) => <div className={`p-4 flex-grow ${className}`}>{children}</div>;
+const CardFooter: FC<{ className?: string; children: React.ReactNode }> = ({
+  className,
+  children,
+}) => (
+  <div
+    className={`p-4 border-t border-gray-200 dark:border-gray-700 ${className}`}
+  >
+    {children}
+  </div>
+);
+
+const Button: FC<{
+  className?: string;
+  children: React.ReactNode;
+  onClick?: () => void;
+  [key: string]: any;
+}> = ({ className, children, ...props }) => (
+  <motion.button
+    whileHover={{ scale: 1.05 }}
+    whileTap={{ scale: 0.95 }}
+    className={`inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 dark:bg-indigo-500 dark:hover:bg-indigo-600 dark:focus:ring-offset-gray-800 disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
+    {...props}
+  >
+    {children}
+  </motion.button>
+);
+
+const App: FC = () => {
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [focusedPanelId, setFocusedPanelId] = useState<PanelId>("chat");
+  const [mainPanelSize, setMainPanelSize] = useState<number>(66);
+  const [secondaryPanelSize, setSecondaryPanelSize] = useState<number>(50);
+  const [secondaryOrientation, setSecondaryOrientation] =
+    useState<Orientation>("vertical");
+  const [draggingHandle, setDraggingHandle] = useState<DragHandle>(null);
+  const [secondaryPanelOrder, setSecondaryPanelOrder] = useState<PanelId[]>([
+    "compiler",
+    "video",
+  ]);
+  const [activeMenu, setActiveMenu] = useState<PanelId | null>(null);
+
+  const layoutRef = useRef<HTMLDivElement>(null);
+  const secondaryContainerRef = useRef<HTMLDivElement>(null);
+
+  const handleMouseDown = (
+    e: MouseEvent<HTMLDivElement>,
+    handle: DragHandle
+  ) => {
+    e.preventDefault();
+    setDraggingHandle(handle);
+  };
+
+  const handleMouseUp = useCallback(() => {
+    setDraggingHandle(null);
+  }, []);
+
+  const handleMouseMove = useCallback(
+    (e: globalThis.MouseEvent) => {
+      if (!draggingHandle) return;
+
+      if (draggingHandle === "main" && layoutRef.current) {
+        const bounds = layoutRef.current.getBoundingClientRect();
+        const newSize = ((e.clientX - bounds.left) / bounds.width) * 100;
+        if (newSize > 25 && newSize < 75) setMainPanelSize(newSize);
+      }
+
+      if (draggingHandle === "secondary" && secondaryContainerRef.current) {
+        const bounds = secondaryContainerRef.current.getBoundingClientRect();
+        let newSize;
+        if (secondaryOrientation === "vertical") {
+          newSize = ((e.clientY - bounds.top) / bounds.height) * 100;
+        } else {
+          newSize = ((e.clientX - bounds.left) / bounds.width) * 100;
+        }
+        if (newSize > 15 && newSize < 85) setSecondaryPanelSize(newSize);
+      }
+    },
+    [draggingHandle, secondaryOrientation]
+  );
+
+  useEffect(() => {
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [handleMouseMove, handleMouseUp]);
+
+  useEffect(() => {
+    const savedTheme =
+      (localStorage.getItem("theme") as "light" | "dark") || "light";
+    setTheme(savedTheme);
+    document.documentElement.classList.toggle("dark", savedTheme === "dark");
+  }, []);
+
+  const toggleTheme = () => {
+    const newTheme = theme === "light" ? "dark" : "light";
+    setTheme(newTheme);
+    localStorage.setItem("theme", newTheme);
+    document.documentElement.classList.toggle("dark", newTheme === "dark");
+  };
+
+  const panels: Panel[] = [
+    {
+      id: "chat",
+      title: "Chatbot",
+      icon: <MessageSquare className="w-5 h-5 mr-2" />,
+    },
+    {
+      id: "compiler",
+      title: "Compiler",
+      icon: <Code className="w-5 h-5 mr-2" />,
+    },
+    {
+      id: "video",
+      title: "Video Stream",
+      icon: <Video className="w-5 h-5 mr-2" />,
+    },
+  ];
+
+  const cycleLayout = () => {
+    const currentIndex = panels.findIndex((p) => p.id === focusedPanelId);
+    const nextIndex = (currentIndex + 1) % panels.length;
+    setFocusedPanelId(panels[nextIndex].id);
+  };
+
+  useEffect(() => {
+    setSecondaryPanelOrder(
+      panels.filter((p) => p.id !== focusedPanelId).map((p) => p.id)
+    );
+  }, [focusedPanelId]);
+
+  const PanelMenu: FC<{ panelId: PanelId }> = ({ panelId }) => {
+    const isFocused = panelId === focusedPanelId;
+    return (
+      <div className="relative">
+        <Button
+          onClick={() => setActiveMenu(activeMenu === panelId ? null : panelId)}
+          size="sm"
+          variant="ghost"
+          className="p-2 h-8 w-8 bg-transparent hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300"
+        >
+          <MoreVertical className="w-4 h-4" />
+        </Button>
+        <AnimatePresence>
+          {activeMenu === panelId && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-700 rounded-md shadow-lg z-20"
+            >
+              {!isFocused && (
+                <button
+                  onClick={() => {
+                    setFocusedPanelId(panelId);
+                    setActiveMenu(null);
+                  }}
+                  className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-600 flex items-center"
+                >
+                  <Star className="w-4 h-4 mr-2" /> Make Main Panel
+                </button>
+              )}
+              {isFocused && (
+                <button
+                  onClick={() => {
+                    setSecondaryOrientation((o) =>
+                      o === "vertical" ? "horizontal" : "vertical"
+                    );
+                    setActiveMenu(null);
+                  }}
+                  className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-600 flex items-center"
+                >
+                  {secondaryOrientation === "vertical" ? (
+                    <Columns className="w-4 h-4 mr-2" />
+                  ) : (
+                    <Rows className="w-4 h-4 mr-2" />
+                  )}
+                  Toggle Orientation
+                </button>
+              )}
+              {!isFocused && (
+                <button
+                  onClick={() => {
+                    setSecondaryPanelOrder([...secondaryPanelOrder].reverse());
+                    setActiveMenu(null);
+                  }}
+                  className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-600 flex items-center"
+                >
+                  <Shuffle className="w-4 h-4 mr-2" /> Swap Panels
+                </button>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    );
+  };
+
+  const FullChatbotPanel: FC = () => {
+    const [messages, setMessages] = useState<Message[]>([
+      { id: 1, text: "Hello! How can I help you today?", sender: "bot" },
+      { id: 2, text: "I need to build a responsive layout.", sender: "user" },
+    ]);
+    const [inputValue, setInputValue] = useState<string>("");
+    const messagesEndRef = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, [messages]);
+    const handleSendMessage = (e: React.FormEvent<HTMLFormElement>) => {
+      e.preventDefault();
+      if (inputValue.trim()) {
+        setMessages([
+          ...messages,
+          { id: Date.now(), text: inputValue, sender: "user" },
+        ]);
+        setInputValue("");
+      }
+    };
+    return (
+      <Card className="h-full">
+        <CardHeader className="flex justify-between items-center">
+          <CardTitle className="flex items-center">
+            {panels[0].icon} {panels[0].title}
+          </CardTitle>
+          <PanelMenu panelId="chat" />
+        </CardHeader>
+        <CardContent className="overflow-y-auto">
+          <motion.div
+            className="space-y-4"
+            variants={containerVariants}
+            initial="hidden"
+            animate="visible"
+          >
+            {messages.map((msg) => (
+              <motion.div
+                key={msg.id}
+                variants={itemVariants}
+                className={`flex items-start gap-2.5 ${
+                  msg.sender === "user" ? "justify-end" : ""
+                }`}
+              >
+                <div
+                  className={`flex flex-col w-full max-w-[320px] leading-1.5 p-4 border-gray-200 ${
+                    msg.sender === "user"
+                      ? "bg-indigo-500 text-white rounded-s-xl rounded-ee-xl dark:bg-indigo-600"
+                      : "bg-gray-100 rounded-e-xl rounded-es-xl dark:bg-gray-700"
+                  }`}
+                >
+                  <p className="text-sm font-normal">{msg.text}</p>
+                </div>
+              </motion.div>
+            ))}
+            <div ref={messagesEndRef} />
+          </motion.div>
+        </CardContent>
+        <CardFooter>
+          <form
+            onSubmit={handleSendMessage}
+            className="flex items-center space-x-2"
+          >
+            <input
+              type="text"
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              placeholder="Type a message..."
+              className="w-full p-2 rounded-md bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+            <Button type="submit" disabled={!inputValue.trim()} className="p-2">
+              <Send className="w-5 h-5" />
+            </Button>
+          </form>
+        </CardFooter>
+      </Card>
+    );
+  };
+  const FullCompilerPanel: FC = () => (
+    <Card className="h-full">
+      <CardHeader className="flex justify-between items-center">
+        <CardTitle className="flex items-center">
+          {panels[1].icon} {panels[1].title}
+        </CardTitle>
+        <PanelMenu panelId="compiler" />
+      </CardHeader>
+      <CardContent className="p-0">
+        <textarea
+          className="w-full h-full bg-gray-900 text-white font-mono text-sm p-4 resize-none focus:outline-none"
+          defaultValue="console.log('Hello, World!');"
+        ></textarea>
+      </CardContent>
+    </Card>
+  );
+  const FullVideoPanel: FC = () => (
+    <Card className="h-full">
+      <CardHeader className="flex justify-between items-center">
+        <CardTitle className="flex items-center">
+          {panels[2].icon} {panels[2].title}
+        </CardTitle>
+        <PanelMenu panelId="video" />
+      </CardHeader>
+      <CardContent className="bg-black flex items-center justify-center p-0">
+        <video
+          className="w-full h-auto max-h-full"
+          controls
+          poster="https://placehold.co/600x400/000000/FFFFFF?text=Video+Stream"
+        ></video>
+      </CardContent>
+    </Card>
+  );
+  const fullPanelComponents: Record<PanelId, JSX.Element> = {
+    chat: <FullChatbotPanel />,
+    compiler: <FullCompilerPanel />,
+    video: <FullVideoPanel />,
+  };
+
+  return (
+    <div className="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 min-h-screen transition-colors duration-300 font-sans overflow-hidden">
+      <motion.nav
+        initial={{ y: -100 }}
+        animate={{ y: 0 }}
+        transition={{ duration: 0.5, ease: "easeOut" }}
+        className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm shadow-md p-4 flex justify-between items-center sticky top-0 z-10"
+      >
+        <h1 className="text-xl font-bold">Dynamic Dashboard</h1>
+        <div className="flex items-center space-x-2">
+          <Button
+            onClick={cycleLayout}
+            className="p-2 bg-green-600 hover:bg-green-700"
+          >
+            <RefreshCw className="w-5 h-5" />
+            <span className="hidden sm:inline ml-2">Cycle Layout</span>
+          </Button>
+          <Button
+            onClick={toggleTheme}
+            className="p-2 bg-transparent hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300"
+          >
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={theme}
+                initial={{ y: -20, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                exit={{ y: 20, opacity: 0 }}
+              >
+                {theme === "light" ? (
+                  <Moon className="w-5 h-5" />
+                ) : (
+                  <Sun className="w-5 h-5" />
+                )}
+              </motion.div>
+            </AnimatePresence>
+          </Button>
+        </div>
+      </motion.nav>
+      <main className="p-4 h-[calc(100vh-80px)]">
+        <div ref={layoutRef} className="flex h-full w-full">
+          <motion.div
+            className="h-full pr-1"
+            style={{ width: `${mainPanelSize}%` }}
+            animate={{ width: `${mainPanelSize}%` }}
+          >
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={focusedPanelId}
+                className="h-full w-full"
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                transition={{ duration: 0.3 }}
+              >
+                {fullPanelComponents[focusedPanelId]}
+              </motion.div>
+            </AnimatePresence>
+          </motion.div>
+          <div
+            onMouseDown={(e) => handleMouseDown(e, "main")}
+            className="w-2 cursor-col-resize bg-gray-300 dark:bg-gray-600 hover:bg-indigo-500 transition-colors rounded flex items-center justify-center"
+          ></div>
+          <motion.div
+            ref={secondaryContainerRef}
+            className={`h-full pl-1 flex gap-2 ${
+              secondaryOrientation === "vertical" ? "flex-col" : "flex-row"
+            }`}
+            style={{ width: `${100 - mainPanelSize}%` }}
+            animate={{ width: `${100 - mainPanelSize}%` }}
+          >
+            <motion.div
+              className="relative"
+              style={
+                secondaryOrientation === "vertical"
+                  ? { height: `${secondaryPanelSize}%` }
+                  : { width: `${secondaryPanelSize}%` }
+              }
+              animate={
+                secondaryOrientation === "vertical"
+                  ? { height: `${secondaryPanelSize}%` }
+                  : { width: `${secondaryPanelSize}%` }
+              }
+            >
+              {fullPanelComponents[secondaryPanelOrder[0]]}
+            </motion.div>
+            <div
+              onMouseDown={(e) => handleMouseDown(e, "secondary")}
+              className={` ${
+                secondaryOrientation === "vertical"
+                  ? "h-2 w-full cursor-row-resize"
+                  : "w-2 h-full cursor-col-resize"
+              } bg-gray-300 dark:bg-gray-600 hover:bg-indigo-500 transition-colors rounded`}
+            ></div>
+            <motion.div
+              className="relative"
+              style={
+                secondaryOrientation === "vertical"
+                  ? { height: `${100 - secondaryPanelSize}%` }
+                  : { width: `${100 - secondaryPanelSize}%` }
+              }
+              animate={
+                secondaryOrientation === "vertical"
+                  ? { height: `${100 - secondaryPanelSize}%` }
+                  : { width: `${100 - secondaryPanelSize}%` }
+              }
+            >
+              {fullPanelComponents[secondaryPanelOrder[1]]}
+            </motion.div>
+          </motion.div>
+        </div>
+      </main>
+    </div>
+  );
+};
+
+export default App;

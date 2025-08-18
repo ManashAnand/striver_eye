@@ -8,7 +8,17 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 export default function Home() {
-  const [questions, setQuestions] = useState([]);
+  interface QuestionType {
+    id: Number;
+    question: String;
+    markdown: String;
+  }
+
+  interface QuestionWhole extends Array<QuestionType> {}
+
+  const [questions, setQuestions] = useState<QuestionWhole>([
+    { id: 0, question: "", markdown: "" },
+  ]);
   const router = useRouter();
   useEffect(() => {
     const fn = async () => {
@@ -40,7 +50,7 @@ export default function Home() {
           {questions?.map((item, index) => {
             return (
               <div
-                key={item.id || item.question || index} // Use a unique ID if available, otherwise fall back
+                key={index} // Use a unique ID if available, otherwise fall back
                 className="w-full m-4 p-2 bg-white text-black cursor-pointer rounded-md"
                 onClick={() => router.push(`/chatbot/${item.question}`)}
               >

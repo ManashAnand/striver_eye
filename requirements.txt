@@ -9,3 +9,4 @@ asyncpg
 
 # Optional but common utilities
 pydantic
+supabase

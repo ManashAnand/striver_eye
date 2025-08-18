@@ -1,1 +1,1 @@
-from .connect import SupabaseConnector
+from .connect import get_supabase_client

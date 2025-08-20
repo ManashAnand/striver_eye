@@ -573,22 +573,124 @@ const App: FC<{ problemId?: string }> = ({ problemId }) => {
       </Card>
     );
   };
-  const FullCompilerPanel: FC = () => (
-    <Card className="h-full">
-      <CardHeader className="flex justify-between items-center">
-        <CardTitle className="flex items-center">
-          {panels[1].icon} {panels[1].title}
-        </CardTitle>
-        <PanelMenu panelId="compiler" />
-      </CardHeader>
-      <CardContent className="p-0">
-        <textarea
-          className="w-full h-full bg-gray-900 text-white font-mono text-sm p-4 resize-none focus:outline-none"
-          defaultValue="console.log('Hello, World!');"
-        ></textarea>
-      </CardContent>
-    </Card>
-  );
+  const FullCompilerPanel: FC = () => {
+    const [ciUserId, setCiUserId] = useState<string>("");
+    const [codeInput, setCodeInput] = useState<string>(
+      "# Python\nprint('Hello from Codeinterpreter')\n"
+    );
+    const [isRunning, setIsRunning] = useState<boolean>(false);
+    const [resultText, setResultText] = useState<string>("");
+
+    useEffect(() => {
+      const key = "composio_user_id";
+      let uid = localStorage.getItem(key);
+      if (!uid) {
+        uid = `web-${Math.random().toString(36).slice(2)}-${Date.now()}`;
+        localStorage.setItem(key, uid);
+      }
+      setCiUserId(uid);
+    }, []);
+
+    const runInCodeInterpreter = async () => {
+      if (isRunning) return;
+      setIsRunning(true);
+      setResultText("");
+      try {
+        const messages = [
+          {
+            role: "system",
+            content:
+              "You are connected to Composio's Codeinterpreter toolkit. Execute the provided Python code in a sandbox and return stdout, stderr, and any file outputs. Prefer saving charts/images to files under /home/user and report their paths.",
+          },
+          {
+            role: "user",
+            content: `Run this code:\n\n\`\`\`python\n${codeInput}\n\`\`\``,
+          },
+        ];
+        const res = await fetch("/api/tools/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user_id: ciUserId || "web-ci-anon",
+            messages,
+            toolkits: ["CODEINTERPRETER"],
+            model: "gpt-4o",
+          }),
+        });
+        if (!res.ok) {
+          const t = await res.text();
+          throw new Error(t || `HTTP ${res.status}`);
+        }
+        const data = await res.json();
+        const result: any = data?.result;
+        let stdoutParts: string[] = [];
+        if (Array.isArray(result)) {
+          for (const item of result) {
+            const out = item?.data?.stdout;
+            if (out) stdoutParts.push(String(out));
+          }
+        } else if (result && typeof result === "object") {
+          const out = (result as any)?.data?.stdout;
+          if (out) stdoutParts.push(String(out));
+        }
+        let finalOut = stdoutParts.join("\n").trim();
+        if (!finalOut) {
+          // Fallback to stderr or error if stdout is empty
+          let errParts: string[] = [];
+          if (Array.isArray(result)) {
+            for (const item of result) {
+              const err = item?.data?.stderr || item?.data?.error || item?.error;
+              if (err) errParts.push(String(err));
+            }
+          } else if (result && typeof result === "object") {
+            const err = (result as any)?.data?.stderr || (result as any)?.data?.error || (result as any)?.error;
+            if (err) errParts.push(String(err));
+          }
+          finalOut = errParts.join("\n").trim();
+        }
+        setResultText(finalOut || "");
+      } catch (err: any) {
+        setResultText(err?.message || "Failed to run in Codeinterpreter");
+      } finally {
+        setIsRunning(false);
+      }
+    };
+
+    return (
+      <Card className="h-full">
+        <CardHeader className="flex justify-between items-center">
+          <CardTitle className="flex items-center">
+            {panels[1].icon} Codeinterpreter
+          </CardTitle>
+          <PanelMenu panelId="compiler" />
+        </CardHeader>
+        <CardContent className="p-0 grid grid-rows-2 h-full">
+          <div className="p-3 border-b border-gray-200 dark:border-gray-700 flex flex-col gap-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs text-gray-500">Python Code</span>
+              <div className="flex gap-2">
+                <Button onClick={runInCodeInterpreter} disabled={isRunning} className="py-1 px-3 h-8">
+                  {isRunning ? <RefreshCw className="w-4 h-4 animate-spin" /> : "Run in Codeinterpreter"}
+                </Button>
+              </div>
+            </div>
+            <textarea
+              className="w-full h-40 bg-gray-900 text-white font-mono text-sm p-3 rounded resize-none focus:outline-none"
+              value={codeInput}
+              onChange={(e) => setCodeInput(e.target.value)}
+              spellCheck={false}
+            />
+          </div>
+          <div className="p-3 overflow-auto">
+            <span className="block text-xs text-gray-500 mb-2">Result</span>
+            <pre className="whitespace-pre-wrap break-words text-sm bg-gray-100 dark:bg-gray-800 p-3 rounded">
+{resultText || "No output yet."}
+            </pre>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  };
   const FullVideoPanel: FC = () => (
     <Card className="h-full">
       <CardHeader className="flex justify-between items-center">

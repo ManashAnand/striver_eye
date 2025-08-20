@@ -15,3 +15,5 @@ supabase
 boto3
 openai>=1.30.0
 manimce
+composio
+composio-openai

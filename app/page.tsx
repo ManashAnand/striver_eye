@@ -1,5 +1,10 @@
 "use client";
+import { BentoSection } from "@/components/bento-section";
+import { CTASection } from "@/components/cta-section";
 import Question from "@/components/custom/Question";
+import { FooterSection } from "@/components/footer-section";
+import { LargeTestimonial } from "@/components/large-testimonial";
+import { PricingSection } from "@/components/pricing-section";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
@@ -65,10 +70,12 @@ export default function Home() {
             );
           })}
         </div> */}
-        <div className="relative z-10">
-          <Question questions={questions} />
-        </div>
-        </div>
+        <CTASection />
+        <Question questions={questions} />
+        <BentoSection />
+        <PricingSection />
+        <FooterSection /> 
+      </div>
     </>
   );
 }

@@ -5,6 +5,7 @@ import React, {
   useEffect,
   useRef,
   useCallback,
+  useMemo,
   FC,
   MouseEvent,
 } from "react";
@@ -39,6 +40,19 @@ interface Message {
   id: number;
   text: string;
   sender: "bot" | "user";
+}
+
+interface ChatApiMessage {
+  role: "user" | "assistant" | "system";
+  content: string;
+}
+
+interface ChatApiResponse {
+  ok: boolean;
+  assistant_text?: string;
+  result?: any;
+  raw?: any;
+  detail?: string;
 }
 
 // Animation Variants
@@ -194,23 +208,26 @@ const App: FC = () => {
     document.documentElement.classList.toggle("dark", newTheme === "dark");
   };
 
-  const panels: Panel[] = [
-    {
-      id: "chat",
-      title: "Strive AI",
-      icon: <MessageSquare className="w-5 h-5 mr-2" />,
-    },
-    {
-      id: "compiler",
-      title: "Compiler",
-      icon: <Code className="w-5 h-5 mr-2" />,
-    },
-    {
-      id: "video",
-      title: "Video Stream",
-      icon: <Video className="w-5 h-5 mr-2" />,
-    },
-  ];
+  const panels: Panel[] = useMemo(
+    () => [
+      {
+        id: "chat",
+        title: "Strive AI",
+        icon: <MessageSquare className="w-5 h-5 mr-2" />,
+      },
+      {
+        id: "compiler",
+        title: "Compiler",
+        icon: <Code className="w-5 h-5 mr-2" />,
+      },
+      {
+        id: "video",
+        title: "Video Stream",
+        icon: <Video className="w-5 h-5 mr-2" />,
+      },
+    ],
+    []
+  );
 
   const cycleLayout = () => {
     const currentIndex = panels.findIndex((p) => p.id === focusedPanelId);
@@ -222,7 +239,7 @@ const App: FC = () => {
     setSecondaryPanelOrder(
       panels.filter((p) => p.id !== focusedPanelId).map((p) => p.id)
     );
-  }, [focusedPanelId]);
+  }, [focusedPanelId, panels]);
 
   const getIllustration = async () => {
     console.log("started illustration");
@@ -291,21 +308,72 @@ const App: FC = () => {
   const FullChatbotPanel: FC = () => {
     const [messages, setMessages] = useState<Message[]>([
       { id: 1, text: "Hello! How can I help you today?", sender: "bot" },
-      { id: 2, text: "I need to build a responsive layout.", sender: "user" },
     ]);
     const [inputValue, setInputValue] = useState<string>("");
+    const [isLoading, setIsLoading] = useState<boolean>(false);
+    const [error, setError] = useState<string>("");
+    const [userId, setUserId] = useState<string>("");
     const messagesEndRef = useRef<HTMLDivElement>(null);
     useEffect(() => {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [messages]);
-    const handleSendMessage = (e: React.FormEvent<HTMLFormElement>) => {
+    useEffect(() => {
+      const key = "composio_user_id";
+      let uid = localStorage.getItem(key);
+      if (!uid) {
+        uid = `web-${Math.random().toString(36).slice(2)}-${Date.now()}`;
+        localStorage.setItem(key, uid);
+      }
+      setUserId(uid);
+    }, []);
+
+    const callComposioChat = async (allMessages: Message[]): Promise<string> => {
+      const payloadMessages: ChatApiMessage[] = allMessages.map((m) => ({
+        role: m.sender === "bot" ? "assistant" : "user",
+        content: m.text,
+      }));
+      const res = await fetch("/api/tools/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: userId || "web-anon",
+          messages: payloadMessages,
+          toolkits: ["HACKERNEWS"],
+          // model: "gpt-4o", // optional; rely on backend default
+        }),
+      });
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(errText || `HTTP ${res.status}`);
+      }
+      const data: ChatApiResponse = await res.json();
+      if (!data.ok) {
+        throw new Error(data.detail || "Unknown error");
+      }
+      return data.assistant_text || "";
+    };
+    const handleSendMessage = async (e: React.FormEvent<HTMLFormElement>) => {
       e.preventDefault();
-      if (inputValue.trim()) {
-        setMessages([
-          ...messages,
-          { id: Date.now(), text: inputValue, sender: "user" },
-        ]);
-        setInputValue("");
+      const trimmed = inputValue.trim();
+      if (!trimmed || isLoading) return;
+      setError("");
+      const userMsg: Message = { id: Date.now(), text: trimmed, sender: "user" };
+      const optimistic = [...messages, userMsg];
+      setMessages(optimistic);
+      setInputValue("");
+      setIsLoading(true);
+      try {
+        const assistantText = await callComposioChat(optimistic);
+        const botMsg: Message = {
+          id: Date.now() + 1,
+          text: assistantText || "",
+          sender: "bot",
+        };
+        setMessages((prev) => [...prev, botMsg]);
+      } catch (err: any) {
+        setError(err?.message || "Something went wrong");
+      } finally {
+        setIsLoading(false);
       }
     };
     return (
@@ -355,12 +423,22 @@ const App: FC = () => {
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               placeholder="Type a message..."
-              className="w-full p-2 rounded-md bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              disabled={isLoading}
+              className="w-full p-2 rounded-md bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-60"
             />
-            <Button type="submit" disabled={!inputValue.trim()} className="p-2">
-              <Send className="w-5 h-5" />
+            <Button type="submit" disabled={!inputValue.trim() || isLoading} className="p-2">
+              {isLoading ? (
+                <RefreshCw className="w-5 h-5 animate-spin" />
+              ) : (
+                <Send className="w-5 h-5" />
+              )}
             </Button>
           </form>
+          {error && (
+            <div className="mt-2 text-sm text-red-600 dark:text-red-400">
+              {error}
+            </div>
+          )}
         </CardFooter>
       </Card>
     );

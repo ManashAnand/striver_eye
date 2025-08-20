@@ -223,6 +223,13 @@ const App: FC = () => {
     );
   }, [focusedPanelId]);
 
+  const getIllustration = async () => {
+    console.log("started illustration");
+    const res = await fetch("/api/get-illustration?q=search+in+bst");
+    const data = await res.json();
+    console.log(data);
+  };
+
   const PanelMenu: FC<{ panelId: PanelId }> = ({ panelId }) => {
     const isFocused = panelId === focusedPanelId;
     return (
@@ -423,6 +430,15 @@ const App: FC = () => {
             <RefreshCw className="w-5 h-5" />
             <span className="hidden sm:inline ml-2">Cycle Layout</span>
           </Button>
+
+          <Button
+            onClick={getIllustration}
+            className="p-2 bg-green-600 hover:bg-green-700"
+          >
+            <RefreshCw className="w-5 h-5" />
+            <span className="hidden sm:inline ml-2">Get illustration </span>
+          </Button>
+
           <Button
             onClick={toggleTheme}
             className="p-2 bg-transparent hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300"

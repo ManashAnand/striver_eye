@@ -10,11 +10,14 @@ from fastapi import FastAPI, Query
 from fastapi import Depends
 
 from .supabase import get_supabase_client
+from .router import router
 
 
 load_dotenv()
 
 app = FastAPI()
+app.include_router(router)
+
 
 app.add_middleware(
     CORSMiddleware,

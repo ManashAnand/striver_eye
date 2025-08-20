@@ -1,5 +1,6 @@
 "use client";
 import Chatbot from "@/components/custom/ChatBot";
+import { QuestionAccordion } from "@/components/custom/Question";
 import { ModeToggle } from "@/components/ModeToggle";
 import { Button } from "@/components/ui/button";
 import Image from "next/image";
@@ -9,15 +10,25 @@ import { useEffect, useState } from "react";
 
 export default function Home() {
   interface QuestionType {
-    id: Number;
-    question: String;
-    markdown: String;
+    id: number;
+    title: string;
+    difficulty: string;
+    question: string;
+    markdown: string;
+    created_at: string;
   }
 
   interface QuestionWhole extends Array<QuestionType> {}
 
   const [questions, setQuestions] = useState<QuestionWhole>([
-    { id: 0, question: "", markdown: "" },
+    {
+      id: 0,
+      question: "",
+      markdown: "",
+      difficulty: "",
+      title: "",
+      created_at: "",
+    },
   ]);
   const router = useRouter();
   useEffect(() => {
@@ -46,7 +57,7 @@ export default function Home() {
         `,
           }}
         />
-        <div className="relative z-10">
+        {/* <div className="relative z-10">
           {questions?.map((item, index) => {
             return (
               <div
@@ -58,7 +69,8 @@ export default function Home() {
               </div>
             );
           })}
-        </div>
+        </div> */}
+        <QuestionAccordion questions={questions} />
       </div>
     </>
   );

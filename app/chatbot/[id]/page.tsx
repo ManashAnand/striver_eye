@@ -1,12 +1,10 @@
 import React from "react";
 import Chat from "@/components/custom/ChatBot";
 
-const chat = () => {
+export default function ChatPage({ params }: { params: { id: string } }) {
   return (
     <div>
-      <Chat />
+      <Chat problemId={params.id} />
     </div>
   );
-};
-
-export default chat;
+}

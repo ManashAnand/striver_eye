@@ -9,6 +9,8 @@ import React, {
   FC,
   MouseEvent,
 } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { motion, AnimatePresence } from "motion/react";
 import {
   MessageSquare,
@@ -116,6 +118,58 @@ const CardFooter: FC<{ className?: string; children: React.ReactNode }> = ({
   </div>
 );
 
+// Markdown renderer for assistant messages
+const MarkdownMessage: FC<{ content: string }> = ({ content }) => {
+  return (
+    <div className="prose prose-sm dark:prose-invert max-w-none">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          code({ inline, className, children, ...props }: any) {
+            if (inline) {
+              return (
+                <code
+                  className={`px-1 py-0.5 rounded bg-gray-200 dark:bg-gray-800 text-[0.85em] ${className || ""}`}
+                  {...props}
+                >
+                  {children}
+                </code>
+              );
+            }
+            return (
+              <pre className="whitespace-pre-wrap break-words bg-gray-900 text-gray-100 p-3 rounded-md overflow-x-auto">
+                <code className={className || ""} {...props}>
+                  {children}
+                </code>
+              </pre>
+            );
+          },
+          p({ children }) {
+            return <p className="mb-3 leading-relaxed">{children}</p>;
+          },
+          h1({ children }) {
+            return <h1 className="text-xl font-semibold mb-2">{children}</h1>;
+          },
+          h2({ children }) {
+            return <h2 className="text-lg font-semibold mb-2">{children}</h2>;
+          },
+          h3({ children }) {
+            return <h3 className="text-base font-semibold mb-2">{children}</h3>;
+          },
+          ul({ children }) {
+            return <ul className="list-disc pl-5 mb-3">{children}</ul>;
+          },
+          ol({ children }) {
+            return <ol className="list-decimal pl-5 mb-3">{children}</ol>;
+          },
+        }}
+      >
+        {content}
+      </ReactMarkdown>
+    </div>
+  );
+};
+
 const Button: FC<{
   className?: string;
   children: React.ReactNode;
@@ -132,7 +186,7 @@ const Button: FC<{
   </motion.button>
 );
 
-const App: FC = () => {
+const App: FC<{ problemId?: string }> = ({ problemId }) => {
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [focusedPanelId, setFocusedPanelId] = useState<PanelId>("chat");
   const [mainPanelSize, setMainPanelSize] = useState<number>(66);
@@ -145,6 +199,7 @@ const App: FC = () => {
     "video",
   ]);
   const [activeMenu, setActiveMenu] = useState<PanelId | null>(null);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
 
   const layoutRef = useRef<HTMLDivElement>(null);
   const secondaryContainerRef = useRef<HTMLDivElement>(null);
@@ -311,6 +366,7 @@ const App: FC = () => {
     ]);
     const [inputValue, setInputValue] = useState<string>("");
     const [isLoading, setIsLoading] = useState<boolean>(false);
+    const [isIllustrating, setIsIllustrating] = useState<boolean>(false);
     const [error, setError] = useState<string>("");
     const [userId, setUserId] = useState<string>("");
     const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -328,10 +384,26 @@ const App: FC = () => {
     }, []);
 
     const callComposioChat = async (allMessages: Message[]): Promise<string> => {
-      const payloadMessages: ChatApiMessage[] = allMessages.map((m) => ({
+      const formattingSystem: ChatApiMessage = {
+        role: "system",
+        content:
+          "When you include C++ code: 1) Use GitHub-flavored Markdown fenced code blocks with the language identifier cpp, 2) Put the main code block before explanations, 3) Keep explanations concise (bullets preferred), 4) Avoid extra prose and avoid nesting code fences inside quotes, 5) Ensure snippets are compilable where possible.",
+      };
+      const systemContext: ChatApiMessage[] = problemId
+        ? [
+            {
+              role: "system",
+              content: `Page context: problemId=${problemId}. If the user asks about the current question or references the page id, call the get_problem_by_id tool with { id: ${Number(
+                problemId
+              )} } to fetch details, then answer using that data.`,
+            },
+          ]
+        : [];
+      const userAssistantMsgs: ChatApiMessage[] = allMessages.map((m) => ({
         role: m.sender === "bot" ? "assistant" : "user",
         content: m.text,
       }));
+      const payloadMessages = [formattingSystem, ...systemContext, ...userAssistantMsgs];
       const res = await fetch("/api/tools/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -376,13 +448,67 @@ const App: FC = () => {
         setIsLoading(false);
       }
     };
+
+    const handleGenerateIllustration = async () => {
+      if (!problemId || isIllustrating) return;
+      setError("");
+      setIsIllustrating(true);
+      try {
+        const res = await fetch(`/api/get-illustration-by-id?id=${Number(problemId)}&render=true`);
+        if (!res.ok) {
+          const txt = await res.text();
+          throw new Error(txt || `HTTP ${res.status}`);
+        }
+        const data: any = await res.json();
+        const parts: string[] = [];
+        if (data.video_url) {
+          setVideoUrl(data.video_url);
+          setFocusedPanelId("video");
+          parts.push(`[Illustration video](${data.video_url})`);
+        }
+        if (data.warning) {
+          parts.push(`Warning: ${data.warning}`);
+        }
+        if (data.render_error) {
+          parts.push(`Render error: ${data.render_error}`);
+        }
+        if (data.code) {
+          parts.push("```python\n" + data.code + "\n```");
+        }
+        const text = parts.join("\n\n");
+        const botMsg: Message = { id: Date.now(), text, sender: "bot" };
+        setMessages((prev) => [...prev, botMsg]);
+      } catch (e: any) {
+        setError(e?.message || "Failed to generate illustration");
+      } finally {
+        setIsIllustrating(false);
+      }
+    };
     return (
       <Card className="h-full">
         <CardHeader className="flex justify-between items-center">
           <CardTitle className="flex items-center">
             {panels[0].icon} {panels[0].title}
           </CardTitle>
-          <PanelMenu panelId="chat" />
+          <div className="flex items-center gap-2">
+            {problemId && (
+              <Button
+                onClick={handleGenerateIllustration}
+                disabled={isIllustrating}
+                className="h-8 px-3 py-1 text-xs"
+                title="Generate a Manim illustration for this problem"
+              >
+                {isIllustrating ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin mr-1" /> Generating
+                  </>
+                ) : (
+                  <>Generate Illustration</>
+                )}
+              </Button>
+            )}
+            <PanelMenu panelId="chat" />
+          </div>
         </CardHeader>
         <CardContent className="overflow-y-auto">
           <motion.div
@@ -406,7 +532,11 @@ const App: FC = () => {
                       : "bg-gray-100 rounded-e-xl rounded-es-xl dark:bg-gray-700"
                   }`}
                 >
-                  <p className="text-sm font-normal">{msg.text}</p>
+                  {msg.sender === "bot" ? (
+                    <MarkdownMessage content={msg.text} />
+                  ) : (
+                    <p className="text-sm font-normal">{msg.text}</p>
+                  )}
                 </div>
               </motion.div>
             ))}
@@ -468,11 +598,17 @@ const App: FC = () => {
         <PanelMenu panelId="video" />
       </CardHeader>
       <CardContent className="bg-black flex items-center justify-center p-0">
-        <video
-          className="w-full h-auto max-h-full"
-          controls
-          poster="https://placehold.co/600x400/000000/FFFFFF?text=Video+Stream"
-        ></video>
+        {videoUrl ? (
+          <video
+            key={videoUrl}
+            className="w-full h-auto max-h-full"
+            controls
+            playsInline
+            src={videoUrl}
+          />
+        ) : (
+          <div className="text-gray-400 p-6 text-sm">No video yet. Generate one from the chat panel.</div>
+        )}
       </CardContent>
     </Card>
   );

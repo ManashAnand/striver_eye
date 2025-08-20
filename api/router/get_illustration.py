@@ -123,9 +123,45 @@ def _validate_manim_code(code: str) -> Optional[str]:
     return "; ".join(problems) if problems else None
 
 
+def _sanitize_manim_code(code: str) -> str:
+    """Best-effort fixups for common non-animated operations passed to self.play.
+
+    Converts patterns like obj.set_fill(...), obj.set_color(...), obj.move_to(...)
+    used inside self.play(...) into obj.animate.set_fill(...), etc.
+    Only transforms occurrences on lines that contain "self.play(" to avoid
+    altering object initialization chains.
+    """
+    def replace_set_calls(line: str) -> str:
+        # Replace foo.set_xxx( -> foo.animate.set_xxx( when not already animated
+        return re.sub(
+            r"(?<!animate\.)(([A-Za-z_][A-Za-z0-9_\.]*)\.set_([A-Za-z0-9_]+)\()",
+            lambda m: f"{m.group(2)}.animate.set_{m.group(3)}(",
+            line,
+        )
+
+    def replace_motion_calls(line: str) -> str:
+        # Replace common transform-like methods to their animate variants
+        return re.sub(
+            r"(?<!animate\.)(([A-Za-z_][A-Za-z0-9_\.]*)\.(move_to|shift|scale|rotate|next_to|stretch|to_edge|arrange|align_to)\()",
+            lambda m: f"{m.group(2)}.animate.{m.group(3)}(",
+            line,
+        )
+
+    # Process line-by-line to keep the transformation scoped to play calls
+    sanitized_lines = []
+    for original_line in code.splitlines():
+        if "self.play(" in original_line:
+            new_line = replace_set_calls(original_line)
+            new_line = replace_motion_calls(new_line)
+            sanitized_lines.append(new_line)
+        else:
+            sanitized_lines.append(original_line)
+    return "\n".join(sanitized_lines)
+
+
 @router.get("/get-illustration")
 async def get_illustration(
-    q: str = Query(..., min_length=1),
+    id: str = Query(..., min_length=1),
     render: bool = Query(True),  # set True to render+upload by default
     bucket: str = Query("illustrations"),
     db: Client = Depends(get_supabase_client),
@@ -133,7 +169,7 @@ async def get_illustration(
     # fetch row
     try:
         resp = (
-            await db.table("problems").select("*").eq("question", q).limit(1).execute()
+            await db.table("problems").select("*").eq("id", id).limit(1).execute()
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail="Supabase query failed") from e
@@ -175,7 +211,10 @@ async def get_illustration(
 
     if render:
         try:
-            mp4_path = render_manim_scene(code, "AlgoVizScene")
+            # Best-effort sanitization to convert non-animated operations
+            # accidentally passed to self.play into animate calls.
+            safe_code = _sanitize_manim_code(code)
+            mp4_path = render_manim_scene(safe_code, "AlgoVizScene")
             key = f"algo-viz/{_slug(question)}/{_short_hash(code)}.mp4"
 
             signed_url = await upload_to_supabase(mp4_path, "illustrations", key, db)
@@ -185,3 +224,14 @@ async def get_illustration(
             result.update({"render_error": str(e)})
 
     return result
+
+
+@router.get("/get-illustration-by-id")
+async def get_illustration_by_id(
+    id: str = Query(..., min_length=1),
+    render: bool = Query(True),
+    bucket: str = Query("illustrations"),
+    db: Client = Depends(get_supabase_client),
+):
+    # Alias endpoint to support existing frontend calls
+    return await get_illustration(id=id, render=render, bucket=bucket, db=db)

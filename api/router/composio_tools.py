@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import json
+from api.supabase import get_supabase_client
 
 from openai import OpenAI
 from composio import Composio
@@ -72,25 +73,110 @@ def _maybe_handle_local_sum_tool(completion: Any) -> Optional[str]:
         return None
 
 
+def _get_problem_by_id_tool_schema() -> Dict[str, Any]:
+    return {
+        "type": "function",
+        "function": {
+            "name": "get_problem_by_id",
+            "description": "Fetch a problem row from Supabase 'problems' table by its numeric id and summarize it for the user.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "integer", "minimum": 1, "description": "Problem id from the URL, e.g., /chatbot/135 -> 135"},
+                },
+                "required": ["id"],
+                "additionalProperties": False,
+            },
+        },
+    }
+
+
+async def _maybe_handle_local_problem_tool(completion: Any) -> Optional[str]:
+    try:
+        choice = completion.choices[0]
+        tool_calls = getattr(getattr(choice, "message", None), "tool_calls", None)
+        if not tool_calls:
+            return None
+        for call in tool_calls:
+            fn = getattr(call, "function", None)
+            if not fn:
+                continue
+            name = getattr(fn, "name", None)
+            if name != "get_problem_by_id":
+                continue
+            args_raw = getattr(fn, "arguments", "{}")
+            try:
+                args = json.loads(args_raw or "{}")
+            except Exception:
+                args = {}
+            problem_id = int(args.get("id", 0))
+            if problem_id <= 0:
+                return "I need a valid positive problem id to fetch details."
+            try:
+                db = await get_supabase_client()
+                resp = await db.table("problems").select("*").eq("id", problem_id).limit(1).execute()
+                rows = resp.data or []
+                if not rows:
+                    return f"I could not find a problem with id {problem_id}."
+                row = rows[0]
+                question = row.get("question") or "(no question)"
+                markdown = row.get("markdown") or row.get("answer") or ""
+                code = row.get("code") or ""
+                explanation = row.get("explanation") or ""
+                preview = (markdown or "").strip()
+                if len(preview) > 800:
+                    preview = preview[:800] + "..."
+                # Markdown-formatted response
+                response = f"## Problem {problem_id}: {question}\n\n"
+                response += f"**Summary:**\n\n{preview}\n\n"
+                if code:
+                    response += f"---\n**Code Example:**\n\n```cpp\n{code}\n```\n\n"
+                if explanation:
+                    response += f"---\n**Explanation:**\n\n{explanation}\n"
+                return response
+            except Exception as e:
+                return f"An error occurred while fetching the problem: {str(e)}"
+        return None
+    except Exception:
+        return None
+
+
 @router.post("/tools/chat")
 async def chat_with_tools(req: ChatRequest) -> Dict[str, Any]:
     try:
         tools = composio.tools.get(user_id=req.user_id, toolkits=req.toolkits or [])
-        tools = tools + [_sum_two_numbers_tool_schema()]
+        tools = tools + [_sum_two_numbers_tool_schema(), _get_problem_by_id_tool_schema()]
+
+        formatting_system = {
+            "role": "system",
+            "content": (
+                "When you include C++ code: 1) Use GitHub-flavored Markdown fenced code blocks with the language identifier cpp, "
+                "2) Put the main code block before explanations, 3) Keep explanations concise (bullets preferred), "
+                "4) Avoid extra prose and avoid nesting code fences inside quotes, 5) Ensure snippets are compilable where possible."
+            ),
+        }
+
+        ordered_messages = [formatting_system] + [m.model_dump() for m in req.messages]
 
         completion = openai.chat.completions.create(
             model=req.model or "gpt-4o",
-            messages=[m.model_dump() for m in req.messages],
+            messages=ordered_messages,
             tools=tools,
         )
 
-        # Execute the function calls if present
-        result = composio.provider.handle_tool_calls(
-            response=completion, user_id=req.user_id
-        )
+        # Try to let composio handle tool calls, but ignore 'tool not found' errors
+        try:
+            result = composio.provider.handle_tool_calls(
+                response=completion, user_id=req.user_id
+            )
+        except Exception as e:
+            # If the error is about tool not found, ignore and let local handler take over
+            result = None
 
-        # Handle local custom tool calls (e.g., sum_two_numbers)
+        # Handle local custom tool calls (e.g., sum_two_numbers, get_problem_by_id)
         local_text = _maybe_handle_local_sum_tool(completion)
+        if not local_text:
+            local_text = await _maybe_handle_local_problem_tool(completion)
 
         # Try to produce a sensible assistant text for UI
         assistant_text = None

@@ -22,6 +22,7 @@ import {
   Shuffle,
   Star,
   RefreshCw,
+  ToggleLeft,
 } from "lucide-react";
 
 type PanelId = "chat" | "compiler" | "video";
@@ -196,7 +197,7 @@ const App: FC = () => {
   const panels: Panel[] = [
     {
       id: "chat",
-      title: "Chatbot",
+      title: "Strive AI",
       icon: <MessageSquare className="w-5 h-5 mr-2" />,
     },
     {
@@ -261,24 +262,14 @@ const App: FC = () => {
                   <Star className="w-4 h-4 mr-2" /> Make Main Panel
                 </button>
               )}
-              {isFocused && (
                 <button
                   onClick={() => {
-                    setSecondaryOrientation((o) =>
-                      o === "vertical" ? "horizontal" : "vertical"
-                    );
-                    setActiveMenu(null);
+                   cycleLayout();
                   }}
                   className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-600 flex items-center"
                 >
-                  {secondaryOrientation === "vertical" ? (
-                    <Columns className="w-4 h-4 mr-2" />
-                  ) : (
-                    <Rows className="w-4 h-4 mr-2" />
-                  )}
-                  Toggle Orientation
+                 <ToggleLeft /> Toggle Orientation
                 </button>
-              )}
               {!isFocused && (
                 <button
                   onClick={() => {
@@ -415,52 +406,8 @@ const App: FC = () => {
 
   return (
     <div className="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 min-h-screen transition-colors duration-300 font-sans overflow-hidden">
-      <motion.nav
-        initial={{ y: -100 }}
-        animate={{ y: 0 }}
-        transition={{ duration: 0.5, ease: "easeOut" }}
-        className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm shadow-md p-4 flex justify-between items-center sticky top-0 z-10"
-      >
-        <h1 className="text-xl font-bold">Dynamic Dashboard</h1>
-        <div className="flex items-center space-x-2">
-          <Button
-            onClick={cycleLayout}
-            className="p-2 bg-green-600 hover:bg-green-700"
-          >
-            <RefreshCw className="w-5 h-5" />
-            <span className="hidden sm:inline ml-2">Cycle Layout</span>
-          </Button>
-
-          <Button
-            onClick={getIllustration}
-            className="p-2 bg-green-600 hover:bg-green-700"
-          >
-            <RefreshCw className="w-5 h-5" />
-            <span className="hidden sm:inline ml-2">Get illustration </span>
-          </Button>
-
-          <Button
-            onClick={toggleTheme}
-            className="p-2 bg-transparent hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300"
-          >
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={theme}
-                initial={{ y: -20, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                exit={{ y: 20, opacity: 0 }}
-              >
-                {theme === "light" ? (
-                  <Moon className="w-5 h-5" />
-                ) : (
-                  <Sun className="w-5 h-5" />
-                )}
-              </motion.div>
-            </AnimatePresence>
-          </Button>
-        </div>
-      </motion.nav>
-      <main className="p-4 h-[calc(100vh-80px)]">
+    
+      <main className="p-4 h-[calc(100vh)]">
         <div ref={layoutRef} className="flex h-full w-full">
           <motion.div
             className="h-full pr-1"

@@ -1,10 +1,5 @@
 "use client";
-import Chatbot from "@/components/custom/ChatBot";
-import { QuestionAccordion } from "@/components/custom/Question";
-import { ModeToggle } from "@/components/ModeToggle";
-import { Button } from "@/components/ui/button";
-import Image from "next/image";
-import Link from "next/link";
+import Question from "@/components/custom/Question";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
@@ -48,7 +43,7 @@ export default function Home() {
     <>
       <div className="min-h-screen w-full bg-black relative">
         <div
-          className="absolute inset-0 z-0"
+          className="absolute inset-0 z-0 pointer-events-none"
           style={{
             backgroundImage: `
           radial-gradient(circle at 50% 100%, rgba(70, 85, 110, 0.5) 0%, transparent 60%),
@@ -70,8 +65,10 @@ export default function Home() {
             );
           })}
         </div> */}
-        <QuestionAccordion questions={questions} />
-      </div>
+        <div className="relative z-10">
+          <Question questions={questions} />
+        </div>
+        </div>
     </>
   );
 }

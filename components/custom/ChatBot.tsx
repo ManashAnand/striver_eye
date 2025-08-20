@@ -20,13 +20,12 @@ import {
   Moon,
   MoreVertical,
   Send,
-  Rows,
-  Columns,
   Shuffle,
   Star,
   RefreshCw,
   ToggleLeft,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 type PanelId = "chat" | "compiler" | "video";
 type Orientation = "vertical" | "horizontal";
@@ -93,11 +92,13 @@ const CardHeader: FC<{ className?: string; children: React.ReactNode }> = ({
     {children}
   </div>
 );
-const CardTitle: FC<{ className?: string; children: React.ReactNode }> = ({
-  className,
-  children,
-}) => (
+const CardTitle: FC<{
+  className?: string;
+  children: React.ReactNode;
+  onClick?: React.MouseEventHandler<HTMLHeadingElement>;
+}> = ({ className, children, onClick }) => (
   <h3
+    onClick={onClick}
     className={`text-lg font-semibold text-gray-900 dark:text-white ${className}`}
   >
     {children}
@@ -267,7 +268,7 @@ const App: FC<{ problemId?: string }> = ({ problemId }) => {
     () => [
       {
         id: "chat",
-        title: "Strive AI",
+        title: "Striver AI",
         icon: <MessageSquare className="w-5 h-5 mr-2" />,
       },
       {
@@ -370,6 +371,7 @@ const App: FC<{ problemId?: string }> = ({ problemId }) => {
     const [error, setError] = useState<string>("");
     const [userId, setUserId] = useState<string>("");
     const messagesEndRef = useRef<HTMLDivElement>(null);
+    const router = useRouter();
     useEffect(() => {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [messages]);
@@ -487,7 +489,9 @@ const App: FC<{ problemId?: string }> = ({ problemId }) => {
     return (
       <Card className="h-full">
         <CardHeader className="flex justify-between items-center">
-          <CardTitle className="flex items-center">
+          <CardTitle className="flex items-center cursor-pointer" onClick={() => {
+            router.push("/");
+          }}>
             {panels[0].icon} {panels[0].title}
           </CardTitle>
           <div className="flex items-center gap-2">
@@ -575,9 +579,10 @@ const App: FC<{ problemId?: string }> = ({ problemId }) => {
   };
   const FullCompilerPanel: FC = () => {
     const [ciUserId, setCiUserId] = useState<string>("");
-    const [codeInput, setCodeInput] = useState<string>(
-      "# Python\nprint('Hello from Codeinterpreter')\n"
-    );
+    const PY_TPL = "# Python\nprint('Hello from Codeinterpreter')\n";
+    const CPP_TPL = `#include <iostream>\nusing namespace std;\nint main(){\n  ios::sync_with_stdio(false);\n  cin.tie(nullptr);\n  cout << "Hello from C++\\n";\n  return 0;\n}\n`;
+    const [lang, setLang] = useState<"python" | "cpp">("python");
+    const [codeInput, setCodeInput] = useState<string>(PY_TPL);
     const [isRunning, setIsRunning] = useState<boolean>(false);
     const [resultText, setResultText] = useState<string>("");
 
@@ -591,21 +596,71 @@ const App: FC<{ problemId?: string }> = ({ problemId }) => {
       setCiUserId(uid);
     }, []);
 
+    useEffect(() => {
+      setCodeInput(lang === "python" ? PY_TPL : CPP_TPL);
+    }, [lang]);
+
     const runInCodeInterpreter = async () => {
       if (isRunning) return;
       setIsRunning(true);
       setResultText("");
       try {
+        if (lang === "cpp") {
+          try {
+            const res = await fetch("/api/compile-run-cpp", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ code: codeInput }),
+            });
+            if (res.ok) {
+              const data = await res.json();
+              const out = (data?.stdout || "").trim();
+              const err = (data?.stderr || "").trim();
+              if (out || err) {
+                setResultText(out || err);
+                return; // we got a local result
+              }
+              // if compiler not found, fall through to CI tools path
+              if (String(data?.stderr || "").toLowerCase().includes("compiler not found")) {
+                // proceed to CI tool path below
+              } else {
+                // unknown case, still show whatever text we have
+                setResultText(out || err || "");
+                return;
+              }
+            }
+          } catch (_) {
+            // fallback to CI tools path
+          }
+        }
+
+        const systemMsg =
+          lang === "python"
+            ? "You are connected to Composio's Codeinterpreter toolkit. Execute the provided Python code in a sandbox and return stdout, stderr, and any file outputs. Prefer saving charts/images to files under /home/user and report their paths."
+            : [
+                "You are connected to Composio's Codeinterpreter toolkit. You MUST only use tools to compile and run C++.",
+                "Follow exactly:",
+                "1) CODEINTERPRETER_CREATE_SANDBOX (keep_alive=300) -> capture sandbox_id",
+                "2) CODEINTERPRETER_UPLOAD_FILE_CMD (destination_path='/home/user/main.cpp', file=<content of code>, overwrite=true, sandbox_id=<sandbox_id>)",
+                "3) CODEINTERPRETER_RUN_TERMINAL_CMD (command='g++ -std=c++17 -O2 -o /home/user/main /home/user/main.cpp', sandbox_id=<sandbox_id>, timeout=60)",
+                "4) CODEINTERPRETER_RUN_TERMINAL_CMD (command='/home/user/main', sandbox_id=<sandbox_id>, timeout=60)",
+                "Return only the stdout produced by step 4 (the backend will parse tool outputs). Do not add any explanations in assistant content.",
+              ].join("\n");
+
+        const userMsg =
+          lang === "python"
+            ? `Run this code:\n\n\`\`\`python\n${codeInput}\n\`\`\``
+            : [
+                "C++ source to compile and run:",
+                "\n\n```cpp",
+                codeInput,
+                "```\n",
+                "Use only tools as instructed in system message.",
+              ].join("");
+
         const messages = [
-          {
-            role: "system",
-            content:
-              "You are connected to Composio's Codeinterpreter toolkit. Execute the provided Python code in a sandbox and return stdout, stderr, and any file outputs. Prefer saving charts/images to files under /home/user and report their paths.",
-          },
-          {
-            role: "user",
-            content: `Run this code:\n\n\`\`\`python\n${codeInput}\n\`\`\``,
-          },
+          { role: "system", content: systemMsg },
+          { role: "user", content: userMsg },
         ];
         const res = await fetch("/api/tools/chat", {
           method: "POST",
@@ -623,31 +678,34 @@ const App: FC<{ problemId?: string }> = ({ problemId }) => {
         }
         const data = await res.json();
         const result: any = data?.result;
-        let stdoutParts: string[] = [];
-        if (Array.isArray(result)) {
-          for (const item of result) {
-            const out = item?.data?.stdout;
-            if (out) stdoutParts.push(String(out));
+
+        const stdoutParts: string[] = [];
+        const stderrParts: string[] = [];
+
+        const collect = (node: any) => {
+          if (node == null) return;
+          if (Array.isArray(node)) {
+            for (const x of node) collect(x);
+            return;
           }
-        } else if (result && typeof result === "object") {
-          const out = (result as any)?.data?.stdout;
-          if (out) stdoutParts.push(String(out));
-        }
-        let finalOut = stdoutParts.join("\n").trim();
-        if (!finalOut) {
-          // Fallback to stderr or error if stdout is empty
-          let errParts: string[] = [];
-          if (Array.isArray(result)) {
-            for (const item of result) {
-              const err = item?.data?.stderr || item?.data?.error || item?.error;
-              if (err) errParts.push(String(err));
+          if (typeof node === "object") {
+            for (const [k, v] of Object.entries(node)) {
+              const key = k.toLowerCase();
+              if (key === "stdout" && typeof v === "string") stdoutParts.push(v);
+              if ((key === "stderr" || key === "error") && typeof v === "string") stderrParts.push(v);
+              collect(v);
             }
-          } else if (result && typeof result === "object") {
-            const err = (result as any)?.data?.stderr || (result as any)?.data?.error || (result as any)?.error;
-            if (err) errParts.push(String(err));
+            return;
           }
-          finalOut = errParts.join("\n").trim();
-        }
+        };
+
+        collect(result);
+
+        // Prefer last non-empty stdout; else show last stderr/error
+        let finalOut = stdoutParts.filter(Boolean).pop()?.trim() || "";
+        if (!finalOut) finalOut = stderrParts.filter(Boolean).pop()?.trim() || "";
+        if (!finalOut) finalOut = (data?.assistant_text || "").trim();
+
         setResultText(finalOut || "");
       } catch (err: any) {
         setResultText(err?.message || "Failed to run in Codeinterpreter");
@@ -667,8 +725,16 @@ const App: FC<{ problemId?: string }> = ({ problemId }) => {
         <CardContent className="p-0 grid grid-rows-2 h-full">
           <div className="p-3 border-b border-gray-200 dark:border-gray-700 flex flex-col gap-2">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-xs text-gray-500">Python Code</span>
+              <span className="text-xs text-gray-500 uppercase">{lang} Code</span>
               <div className="flex gap-2">
+                <select
+                  className="h-8 px-2 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm"
+                  value={lang}
+                  onChange={(e) => setLang(e.target.value as any)}
+                >
+                  <option value="python">Python</option>
+                  <option value="cpp">C++</option>
+                </select>
                 <Button onClick={runInCodeInterpreter} disabled={isRunning} className="py-1 px-3 h-8">
                   {isRunning ? <RefreshCw className="w-4 h-4 animate-spin" /> : "Run in Codeinterpreter"}
                 </Button>

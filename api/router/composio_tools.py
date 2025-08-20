@@ -3,6 +3,9 @@ from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import json
 from api.supabase import get_supabase_client
+import tempfile
+import subprocess
+import os
 
 from openai import OpenAI
 from composio import Composio
@@ -207,4 +210,90 @@ async def chat_with_tools(req: ChatRequest) -> Dict[str, Any]:
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# ---------------------------
+# Native C++ compile & run API
+# ---------------------------
+
+class CppRunRequest(BaseModel):
+    code: str
+    args: Optional[List[str]] = None
+    stdin: Optional[str] = None
+    timeout_sec: Optional[int] = 5
+
+
+@router.post("/compile-run-cpp")
+def compile_run_cpp(req: CppRunRequest) -> Dict[str, Any]:
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cpp_path = os.path.join(tmpdir, "main.cpp")
+            bin_path = os.path.join(tmpdir, "main")
+            with open(cpp_path, "w") as f:
+                f.write(req.code or "")
+
+            # Try common compilers/paths (macOS often has clang++ at /usr/bin/clang++; Homebrew at /opt/homebrew/opt/llvm/bin/clang++)
+            compile_cmds = [
+                ["clang++", "-std=c++17", "-O2", "-o", bin_path, cpp_path],
+                ["/usr/bin/clang++", "-std=c++17", "-O2", "-o", bin_path, cpp_path],
+                ["/opt/homebrew/opt/llvm/bin/clang++", "-std=c++17", "-O2", "-o", bin_path, cpp_path],
+                ["g++", "-std=c++17", "-O2", "-o", bin_path, cpp_path],
+            ]
+
+            compile_ok = False
+            compile_stdout = ""
+            compile_stderr = ""
+            for cmd in compile_cmds:
+                try:
+                    proc = subprocess.run(
+                        cmd,
+                        cwd=tmpdir,
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                    )
+                    compile_stdout = proc.stdout
+                    compile_stderr = proc.stderr
+                    if proc.returncode == 0:
+                        compile_ok = True
+                        break
+                except FileNotFoundError:
+                    # Compiler not found, try next
+                    continue
+
+            if not compile_ok:
+                return {
+                    "ok": False,
+                    "stage": "compile",
+                    "stdout": compile_stdout,
+                    "stderr": compile_stderr or "C++ compiler not found (g++/clang++). Install Xcode Command Line Tools or GCC.",
+                    "exit_code": 1,
+                }
+
+            run_cmd = [bin_path] + (req.args or [])
+            try:
+                proc = subprocess.run(
+                    run_cmd,
+                    cwd=tmpdir,
+                    input=req.stdin or None,
+                    capture_output=True,
+                    text=True,
+                    timeout=max(1, int(req.timeout_sec or 5)),
+                )
+                return {
+                    "ok": proc.returncode == 0,
+                    "stage": "run",
+                    "stdout": proc.stdout,
+                    "stderr": proc.stderr,
+                    "exit_code": proc.returncode,
+                }
+            except subprocess.TimeoutExpired as e:
+                return {
+                    "ok": False,
+                    "stage": "run",
+                    "stdout": e.stdout or "",
+                    "stderr": (e.stderr or "") + "\nTimed out.",
+                    "exit_code": 124,
+                }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
